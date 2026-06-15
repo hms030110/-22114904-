@@ -1,0 +1,579 @@
+/*
+ *(명품 JAVA programming 개정 5판 황기태-김효수 지음) 책으로 공부하며 찾아봐서 기본 틀이랑 여러 코드들이 비슷할수 있습니다.
+ * ===========================================================================
+ * [참조 출처 및 참고 자료]
+ * - URL: https://blog.naver.com/dev-sblee/224071785121
+ * - 참고 내용: 실시간 시계(Timer) 구현 방식 및 GUI 기본 레이아웃 구성 등
+
+import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.*;
+import java.awt.event.*;
+import java.io.*;
+import java.util.ArrayList;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
+//1. 데이터 모델
+class Schedule implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    String title;
+    int dayIdx;
+    int start;
+    int end;
+    Color color;
+    String memo;
+    Color memoColor;
+
+    public Schedule(String title, int dayIdx, int start, int end, Color color) {
+        this.title = title;
+        this.dayIdx = dayIdx;
+        this.start = start;
+        this.end = end;
+        this.color = color;
+        this.memo = "";
+        this.memoColor = Color.BLACK;
+    }
+}
+
+/*
+ * ===========================================================================
+ * [참조 출처 및 참고 자료]
+ * 본 프로그램의 돌림판 기능은 아래 AI의 코드 및 아이디어를 참고하여 작성되었습니다.
+ * - 작성자: Google Gemini
+ * - URL: https://gemini.google.com/app/429e6a633e7451aa?hl=ko
+ * - 참고 내용: 운명의 돌림판(Roulette) 다이얼로그 구현, Timer를 이용한 회전 애니메이션 및 각도 계산 등
+ * ===========================================================================
+ */
+
+//                        2. 돌림판 다이얼로그 (Roulette)
+class RouletteDialog extends JDialog {
+    private double startAngle = 0;
+    private double spinSpeed = 0;
+    private Timer spinTimer;
+    private String[] options = {"공부한다", "안한다"};
+    // 공부한다(파란색 계열), 안한다(빨간색 계열)
+    private Color[] colors = {new Color(153, 204, 255), new Color(255, 153, 153)};
+
+    public RouletteDialog(JFrame parent) {
+        super(parent, "운명의 돌림판", true);
+        setSize(350, 400);
+        setLocationRelativeTo(parent);
+        setLayout(new BorderLayout());
+        getContentPane().setBackground(Color.WHITE);
+
+        JPanel wheelPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g;
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+                int width = getWidth();
+                int height = getHeight();
+                int size = Math.min(width, height) - 60;
+                int x = (width - size) / 2;
+                int y = (height - size) / 2 + 15;
+
+                // 돌림판 부채꼴 그리기
+                for (int i = 0; i < 2; i++) {
+                    g2.setColor(colors[i]);
+                    // Java fillArc는 3시 방향이 0도, 반시계 방향으로 증가
+                    g2.fillArc(x, y, size, size, (int) startAngle + (i * 180), 180);
+
+                    // 테두리
+                    g2.setColor(Color.DARK_GRAY);
+                    g2.drawArc(x, y, size, size, (int) startAngle + (i * 180), 180);
+
+                    // 텍스트 그리기
+                    g2.setColor(Color.BLACK);
+                    g2.setFont(new Font("맑은 고딕", Font.BOLD, 22));
+                    double textAngle = Math.toRadians((startAngle + i * 180 + 90)); // 부채꼴의 중앙 각도
+                    int tx = (int) (width / 2 + (size / 4) * Math.cos(textAngle));
+                    int ty = (int) (height / 2 + 15 - (size / 4) * Math.sin(textAngle));
+
+                    FontMetrics fm = g2.getFontMetrics();
+                    int stringWidth = fm.stringWidth(options[i]);
+                    g2.drawString(options[i], tx - stringWidth / 2, ty + fm.getAscent() / 2);
+                }
+
+                // 상단 지시선(화살표) 그리기
+                g2.setColor(Color.RED);
+                int[] px = {width / 2 - 10, width / 2 + 10, width / 2};
+                int[] py = {y - 15, y - 15, y + 10};
+                g2.fillPolygon(px, py, 3);
+            }
+        };
+        wheelPanel.setBackground(Color.WHITE);
+        add(wheelPanel, BorderLayout.CENTER);
+
+        JButton spinButton = new JButton("돌리기!");
+        spinButton.setFont(new Font("맑은 고딕", Font.BOLD, 18));
+        spinButton.setFocusPainted(false);
+        spinButton.setBackground(Color.WHITE);
+
+        spinButton.addActionListener(e -> {
+            if (spinTimer != null && spinTimer.isRunning()) return;
+
+            spinSpeed = Math.random() * 20 + 30; // 초기 회전 속도 (랜덤성 부여)
+            spinTimer = new Timer(20, new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    startAngle = (startAngle + spinSpeed) % 360;
+                    spinSpeed *= 0.98; // 마찰력 (속도 감소)
+
+                    wheelPanel.repaint();
+
+                    // 속도가 충분히 줄어들면 정지
+                    if (spinSpeed < 0.1) {
+                        spinTimer.stop();
+                        determineResult();
+                    }
+                }
+            });
+            spinTimer.start();
+        });
+
+        JPanel bottomPanel = new JPanel();
+        bottomPanel.setBackground(Color.WHITE);
+        bottomPanel.add(spinButton);
+        add(bottomPanel, BorderLayout.SOUTH);
+    }
+
+    private void determineResult() {
+        // 정규화된 각도 (0 ~ 360)
+        double normalized = startAngle % 360;
+        if (normalized < 0) normalized += 360;
+
+        // 화살표는 90도(상단)에 고정되어 있음.
+        // 역산하여 어느 영역이 90도에 걸려있는지 확인.
+        double pointerAngleOnWheel = (90 - normalized) % 360;
+        if (pointerAngleOnWheel < 0) pointerAngleOnWheel += 360;
+
+        String result;
+        // 0~180도 구간이면 "공부한다" (배열 0번째)
+        if (pointerAngleOnWheel >= 0 && pointerAngleOnWheel < 180) {
+            result = options[0];
+        } else {
+            result = options[1];
+        }
+
+        String msg = result.equals("공부한다") ? "당첨! 당장 책을 펴세요! 📚" : "오예! 오늘은 자유시간! 🎮";
+        JOptionPane.showMessageDialog(this, msg, "돌림판 결과", JOptionPane.INFORMATION_MESSAGE);
+    }
+}
+
+
+
+// 3. 메인 시간표 클래스 (Timetable)
+public class Timetable extends JFrame {
+    private int startHour = 9;
+    private int endHour = 17;
+
+    private ArrayList<Schedule> scheduleList = new ArrayList<>();
+
+    private JTextField tfGridStart, tfGridEnd;
+    private JTextField tfTitle, tfStart, tfEnd;
+    private JComboBox<String> cbDay;
+    private JPanel schedulePanel;
+
+    private String[] days = {"월", "화", "수", "목", "금"};
+    private final int TIME_COLUMN_WIDTH = 50;
+    private final int ROW_HEIGHT = 50;
+    private final int HEADER_HEIGHT = 30;
+
+    private Color[] defaultColors = {
+            new Color(255, 200, 200), new Color(255, 230, 170),
+            new Color(255, 255, 180), new Color(200, 240, 200), new Color(200, 220, 255)
+    };
+
+    public Timetable() {
+        setTitle("시간표 프로그램 (자바기말프로젝트)");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(820, 650);
+
+        Container c = getContentPane();
+        c.setLayout(new BorderLayout());
+        c.setBackground(Color.WHITE);
+
+        JPanel topWrapper = new JPanel(new BorderLayout());
+        topWrapper.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Color.GRAY));
+
+        JPanel pLeftTop = new JPanel(new GridLayout(2, 1));
+        pLeftTop.setBackground(Color.WHITE);
+
+        JPanel pSetting = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        pSetting.setBackground(Color.WHITE);
+        pSetting.add(new JLabel("  [시간표 범위] 시작(시):"));
+        tfGridStart = new JTextField(String.valueOf(startHour), 3);
+        pSetting.add(tfGridStart);
+        pSetting.add(new JLabel("종료(시):"));
+        tfGridEnd = new JTextField(String.valueOf(endHour), 3);
+        pSetting.add(tfGridEnd);
+        JButton btnUpdateGrid = new JButton("변경 적용");
+        btnUpdateGrid.setBackground(Color.WHITE);
+        pSetting.add(btnUpdateGrid);
+        pLeftTop.add(pSetting);
+
+        JPanel pInput = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        pInput.setBackground(Color.WHITE);
+        pInput.add(new JLabel("  [일정 추가] 일정명:"));
+        tfTitle = new JTextField(6);
+        pInput.add(tfTitle);
+        pInput.add(new JLabel("요일:"));
+        cbDay = new JComboBox<>(days);
+        pInput.add(cbDay);
+        pInput.add(new JLabel("시작:"));
+        tfStart = new JTextField(2);
+        pInput.add(tfStart);
+        pInput.add(new JLabel("종료:"));
+        tfEnd = new JTextField(2);
+        pInput.add(tfEnd);
+        JButton btnAdd = new JButton("입력");
+        btnAdd.setBackground(Color.WHITE);
+        pInput.add(btnAdd);
+        pLeftTop.add(pInput);
+
+        topWrapper.add(pLeftTop, BorderLayout.CENTER);
+
+        JPanel pRightTop = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 15));
+        pRightTop.setBackground(Color.WHITE);
+
+        /*
+         * [출처 참고] 우상단 실시간 시계 및 타이머 기능
+         * URL: https://blog.naver.com/dev-sblee/224071785121
+         */
+        JLabel lblClock = new JLabel();
+        lblClock.setFont(new Font("맑은 고딕", Font.BOLD, 15));
+        lblClock.setForeground(new Color(50, 50, 150));
+
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss");
+
+        Timer timer = new Timer(1000, e -> {
+            lblClock.setText("현재(Korea) 시간: " + dtf.format(LocalDateTime.now()) + "  |  ");
+        });
+        timer.start();
+        pRightTop.add(lblClock);
+
+        // 돌림판 버튼 추가
+        JButton btnRoulette = new JButton("돌림판🎲");
+        JButton btnSave = new JButton("다른 이름으로 저장");
+        JButton btnLoad = new JButton("불러오기");
+
+        btnRoulette.setBackground(Color.WHITE);
+        btnSave.setBackground(Color.WHITE);
+        btnLoad.setBackground(Color.WHITE);
+
+        pRightTop.add(btnRoulette);
+        pRightTop.add(btnSave);
+        pRightTop.add(btnLoad);
+
+        topWrapper.add(pRightTop, BorderLayout.EAST);
+        c.add(topWrapper, BorderLayout.NORTH);
+
+        schedulePanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.setColor(Color.LIGHT_GRAY);
+
+                int dayWidth = (getWidth() - TIME_COLUMN_WIDTH) / days.length;
+                for (int i = 0; i <= days.length; i++) {
+                    int x = TIME_COLUMN_WIDTH + i * dayWidth;
+                    g.drawLine(x, 0, x, getHeight());
+                }
+
+                int totalRows = endHour - startHour;
+                for (int i = 0; i <= totalRows; i++) {
+                    int y = HEADER_HEIGHT + i * ROW_HEIGHT;
+                    g.drawLine(0, y, getWidth(), y);
+                }
+            }
+        };
+        schedulePanel.setLayout(null);
+        schedulePanel.setBackground(Color.WHITE);
+        c.add(schedulePanel, BorderLayout.CENTER);
+
+        schedulePanel.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                drawTimetableStructure();
+            }
+        });
+
+        drawTimetableStructure();
+        //[ 버튼 이벤트 리스너 설정 ]
+
+        // 돌림판 버튼 이벤트 처리
+        btnRoulette.addActionListener(e -> {
+            RouletteDialog dialog = new RouletteDialog(this);
+            dialog.setVisible(true);
+        });
+
+        btnUpdateGrid.addActionListener(e -> {
+            try {
+                int newStart = Integer.parseInt(tfGridStart.getText().trim());
+                int newEnd = Integer.parseInt(tfGridEnd.getText().trim());
+                if (newStart >= newEnd || newStart < 0 || newEnd > 24) {
+                    JOptionPane.showMessageDialog(null, "올바른 시간을 입력하세요.");
+                    return;
+                }
+                startHour = newStart;
+                endHour = newEnd;
+                drawTimetableStructure();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(null, "숫자만 입력해주세요.");
+            }
+        });
+
+        btnAdd.addActionListener(e -> {
+            try {
+                String title = tfTitle.getText().trim();
+                int dayIdx = cbDay.getSelectedIndex();
+                int start = Integer.parseInt(tfStart.getText().trim());
+                int end = Integer.parseInt(tfEnd.getText().trim());
+
+                if (title.isEmpty() || start >= end) {
+                    JOptionPane.showMessageDialog(null, "올바른 일정명과 시간을 입력하세요.");
+                    return;
+                }
+
+                boolean isOverlapping = false;
+                for (Schedule existing : scheduleList) {
+                    if (existing.dayIdx == dayIdx) {
+                        if (start < existing.end && existing.start < end) {
+                            isOverlapping = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isOverlapping) {
+                    JOptionPane.showMessageDialog(null, "해당 시간에 이미 겹치는 일정이 존재합니다. 시간을 다시 확인해주세요.");
+                    return;
+                }
+
+                Color defaultColor = defaultColors[dayIdx];
+                scheduleList.add(new Schedule(title, dayIdx, start, end, defaultColor));
+                drawTimetableStructure();
+
+                tfTitle.setText("");
+                tfStart.setText("");
+                tfEnd.setText("");
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(null, "시간은 숫자만 입력해주세요.");
+            }
+        });
+
+        //참조: https://gemini.google.com/app/...
+        //다른이름으로 저장하고 불러오는 기능
+        btnSave.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("저장할 파일 이름을 지정하세요");
+            fileChooser.setFileFilter(new FileNameExtensionFilter("시간표 데이터 파일(*.dat)", "dat"));
+
+            int userSelection = fileChooser.showSaveDialog(Timetable.this);
+            if (userSelection == JFileChooser.APPROVE_OPTION) {
+                File fileToSave = fileChooser.getSelectedFile();
+                String filePath = fileToSave.getAbsolutePath();
+
+                if (!filePath.toLowerCase().endsWith(".dat")) {
+                    fileToSave = new File(filePath + ".dat");
+                }
+
+                try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(fileToSave))) {
+                    oos.writeInt(startHour);
+                    oos.writeInt(endHour);
+                    oos.writeObject(scheduleList);
+                    JOptionPane.showMessageDialog(Timetable.this, "저장 완료: " + fileToSave.getName());
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(Timetable.this, "저장 중 오류가 발생했습니다: " + ex.getMessage());
+                }
+            }
+        });
+
+        @SuppressWarnings("unchecked")
+        ActionListener loadAction = e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            fileChooser.setDialogTitle("불러올 시간표 파일을 선택하세요");
+            fileChooser.setFileFilter(new FileNameExtensionFilter("시간표 데이터 파일(*.dat)", "dat"));
+
+            int userSelection = fileChooser.showOpenDialog(Timetable.this);
+            if (userSelection == JFileChooser.APPROVE_OPTION) {
+                File fileToLoad = fileChooser.getSelectedFile();
+                if (!fileToLoad.exists()) {
+                    JOptionPane.showMessageDialog(Timetable.this, "해당 파일이 존재하지 않습니다.");
+                    return;
+                }
+
+                try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(fileToLoad))) {
+                    startHour = ois.readInt();
+                    endHour = ois.readInt();
+                    scheduleList = (ArrayList<Schedule>) ois.readObject();
+                    tfGridStart.setText(String.valueOf(startHour));
+                    tfGridEnd.setText(String.valueOf(endHour));
+                    drawTimetableStructure();
+                    JOptionPane.showMessageDialog(Timetable.this, "성공적으로 불러왔습니다.");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(Timetable.this, "불러오기 중 오류가 발생했습니다: " + ex.getMessage());
+                }
+            }
+        };
+        btnLoad.addActionListener(loadAction);
+
+        setVisible(true);
+    }
+
+    //4. 시간표 UI 그리기(참조: https://m.blog.naver.com/heesoyou_/221927350057)
+    // (제미나이 참조: https://gemini.google.com/app/d842d214254b3235?android-min-version=301356232&ios-min-version=322.0&is_sa=1&campaign_id=gemini_overview_page&utm_source=gemini&utm_medium=web&utm_campaign=microsite_gemini_about_page&pt=9008&mt=8&ct=gemini_overview_page&hl=ko-KR&icid=microsite_gemini_about_page&_gl=1*1sk0ef2*_up*MQ..*_ga*MTg0NTU1MDYzNi4xNzgxNTEzNDYw*_ga_WC57KJ50ZZ*czE3ODE1MTM0NjAkbzEkZzAkdDE3ODE1MTM0NjAkajYwJGwwJGgw*_ga_BF8Q35BMLM*czE3ODE1MTM0NjAkbzEkZzAkdDE3ODE1MTM0NjAkajYwJGwwJGgw)
+    private void drawTimetableStructure() {
+        schedulePanel.removeAll();
+
+        int panelWidth = schedulePanel.getWidth();
+        if (panelWidth <= TIME_COLUMN_WIDTH) panelWidth = 800;
+        int dayWidth = (panelWidth - TIME_COLUMN_WIDTH) / days.length;
+
+        for (int i = 0; i < days.length; i++) {
+            JLabel dayLabel = new JLabel(days[i]);
+            dayLabel.setHorizontalAlignment(JLabel.CENTER);
+            dayLabel.setFont(new Font("맑은 고딕", Font.BOLD, 13));
+            dayLabel.setBounds(TIME_COLUMN_WIDTH + i * dayWidth, 5, dayWidth, 20);
+            schedulePanel.add(dayLabel);
+        }
+
+        for (int i = startHour; i <= endHour; i++) {
+            JLabel timeLabel = new JLabel(i + ":00");
+            timeLabel.setHorizontalAlignment(JLabel.RIGHT);
+            timeLabel.setBounds(5, HEADER_HEIGHT + (i - startHour) * ROW_HEIGHT - 10, TIME_COLUMN_WIDTH - 10, 20);
+            schedulePanel.add(timeLabel);
+        }
+
+        for (Schedule s : scheduleList) {
+            if (s.end > startHour && s.start < endHour) {
+                int displayStart = Math.max(s.start, startHour);
+                int displayEnd = Math.min(s.end, endHour);
+
+                JLabel block = new JLabel(s.title);
+                block.setOpaque(true);
+                block.setBackground(s.color);
+                block.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+                block.setHorizontalAlignment(JLabel.CENTER);
+
+                if (!s.memo.isEmpty()) {
+                    String hexColor = String.format("#%06x", s.memoColor.getRGB() & 0x00FFFFFF);
+                    block.setToolTipText("<html><b>메모:</b> <span style='color:" + hexColor + ";'>" + s.memo.replaceAll("\n", "<br>") + "</span></html>");
+                }
+
+                int x = TIME_COLUMN_WIDTH + s.dayIdx * dayWidth + 3;
+                int y = HEADER_HEIGHT + (displayStart - startHour) * ROW_HEIGHT + 3;
+                int width = dayWidth - 5;
+                int height = (displayEnd - displayStart) * ROW_HEIGHT - 5;
+
+                block.setBounds(x, y, width, height);
+
+                JPopupMenu popupMenu = new JPopupMenu();
+                JMenuItem colorItem = new JMenuItem("블록 색 바꾸기");
+                JMenuItem memoItem = new JMenuItem("메모 열기");
+                JMenuItem deleteItem = new JMenuItem("삭제하기");
+
+                popupMenu.add(colorItem);
+                popupMenu.add(memoItem);
+                popupMenu.addSeparator();
+                popupMenu.add(deleteItem);
+
+                colorItem.addActionListener(e -> {
+                    Color newColor = JColorChooser.showDialog(null, "블록 색상 선택", s.color);
+                    if (newColor != null) {
+                        s.color = newColor;
+                        block.setBackground(newColor);
+                    }
+                });
+
+                memoItem.addActionListener(e -> openMemoDialog(s, block));
+
+                deleteItem.addActionListener(e -> {
+                    scheduleList.remove(s);
+                    drawTimetableStructure();
+                });
+
+                block.addMouseListener(new MouseAdapter() {
+                    @Override
+                    public void mousePressed(MouseEvent me) {
+                        if (SwingUtilities.isRightMouseButton(me)) {
+                            popupMenu.show(block, me.getX(), me.getY());
+                        }
+                    }
+                });
+
+                schedulePanel.add(block);
+            }
+        }
+
+        schedulePanel.revalidate();
+        schedulePanel.repaint();
+    }
+
+    //5. 메모장 다이얼로그 (참조 책: 802p~805p 컬러다이어로그)
+    private void openMemoDialog(Schedule s, JLabel block) {
+        JDialog memoDialog = new JDialog(this, "[" + s.title + "] 메모장", true);
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        mainPanel.setBackground(Color.WHITE);
+
+        JTextArea textArea = new JTextArea(10, 20);
+        textArea.setFont(new Font("맑은 고딕", Font.PLAIN, 18));
+        textArea.setText(s.memo);
+        textArea.setForeground(s.memoColor);
+
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        mainPanel.add(scrollPane, BorderLayout.CENTER);
+
+        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        bottomPanel.setBackground(Color.WHITE);
+
+        JButton btnTextColor = new JButton("글씨색");
+        JButton btnSaveMemo = new JButton("저장");
+        JButton btnCancel = new JButton("닫기");
+
+        JButton[] btns = {btnTextColor, btnSaveMemo, btnCancel};
+        for(JButton b : btns) {
+            b.setBackground(Color.WHITE);
+            b.setFocusPainted(false);
+            bottomPanel.add(b);
+        }
+        mainPanel.add(bottomPanel, BorderLayout.SOUTH);
+        memoDialog.add(mainPanel);
+
+        btnTextColor.addActionListener(e2 -> {
+            Color newTextColor = JColorChooser.showDialog(memoDialog, "글씨 색상 선택", textArea.getForeground());
+            if (newTextColor != null) textArea.setForeground(newTextColor);
+        });
+
+        btnSaveMemo.addActionListener(e2 -> {
+            s.memo = textArea.getText();
+            s.memoColor = textArea.getForeground();
+            if (!s.memo.isEmpty()) {
+                String hexColor = String.format("#%06x", s.memoColor.getRGB() & 0x00FFFFFF);
+                block.setToolTipText("<html><b>메모:</b> <span style='color:" + hexColor + ";'>" + s.memo.replaceAll("\n", "<br>") + "</span></html>");
+            } else {
+                block.setToolTipText(null);
+            }
+            memoDialog.dispose();
+        });
+
+        btnCancel.addActionListener(e2 -> memoDialog.dispose());
+
+        memoDialog.pack();
+        memoDialog.setLocationRelativeTo(block);
+        memoDialog.setVisible(true);
+    }
+
+    //6. 메인 실행
+    public static void main(String[] args) {
+        new Timetable();
+    }
+}
+/* 구현하고 싶었지만 실패한 목록 
+ * 메모 기능안에 공책 사용하듯이 포스트잇 붙이는 느낌도 넣고 싶었지만 구현 실패.
+ * 돌림판을 원래 제미나이 코드에서 공부한다,안한다를 현재 시간표에 있는 과목들을 넣어 돌림판을 돌려 나오는 과목 공부하기 만들려 하였으나, 입력말고 있는 내용을 돌림판에 넣는 방법을 몰라 구현실패.
+ * 그림 UI를 밑,오른쪽,왼쪽 등 깔끔하게 맞추고 싶었지만 UI를 늘릴때마다 바뀌어 구현 실패.
