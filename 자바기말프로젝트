@@ -3,7 +3,7 @@
  * ===========================================================================
  * [참조 출처 및 참고 자료]
  * - URL: https://blog.naver.com/dev-sblee/224071785121
- * - 참고 내용: 실시간 시계(Timer) 구현 방식 및 GUI 기본 레이아웃 구성 등
+ * - 참고 내용: 실시간 시계(Timer) 구현 방식 및 GUI 기본 레이아웃 구성 등 */
 
 import javax.swing.*;
 import javax.swing.filechooser.FileNameExtensionFilter;
